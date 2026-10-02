@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { formatLocalizedRelativeDate, getUiTranslation, UI_TRANSLATIONS } from '@/lib/translations';
+import { isPlaceholderOrCorruptedImage } from '@/lib/constants';
+import { playSpeech, stopSpeech } from '@/lib/speaker';
 
 export default function ArticleReaderModal({
   article,
@@ -13,13 +15,16 @@ export default function ArticleReaderModal({
 }) {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
 
-  // Stop any active speech synthesis
+  useEffect(() => {
+    setImgFailed(false);
+  }, [article?.link, article?.title]);
+
+  // Stop any active speech
   const stopAudio = useCallback(() => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      setIsPlayingAudio(false);
-    }
+    stopSpeech();
+    setIsPlayingAudio(false);
   }, []);
 
   // Keyboard navigation & escape listener
@@ -78,44 +83,29 @@ export default function ArticleReaderModal({
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
+  const hasValidImage = Boolean(
+    imageUrl &&
+    typeof imageUrl === 'string' &&
+    !isPlaceholderOrCorruptedImage(imageUrl) &&
+    !imgFailed
+  );
+
   const displayHighlights = Array.isArray(highlights) && highlights.length > 0
     ? highlights
     : [summary || snippet];
 
   const handleToggleAudio = () => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      alert('Text-to-speech is not supported on this browser.');
-      return;
-    }
-
     if (isPlayingAudio) {
       stopAudio();
     } else {
-      window.speechSynthesis.cancel();
       const readText = `${title}. ${summary || snippet}`;
-      const utterance = new SpeechSynthesisUtterance(readText);
-
-      // Map language code for speech synthesis voice
-      const langVoiceMap = {
-        en: 'en-IN',
-        hi: 'hi-IN',
-        te: 'te-IN',
-        ta: 'ta-IN',
-        bn: 'bn-IN',
-        mr: 'mr-IN',
-        gu: 'gu-IN',
-        kn: 'kn-IN',
-        ml: 'ml-IN',
-        pa: 'pa-IN',
-      };
-      utterance.lang = langVoiceMap[selectedLanguage] || 'en-IN';
-      utterance.rate = 0.95;
-
-      utterance.onend = () => setIsPlayingAudio(false);
-      utterance.onerror = () => setIsPlayingAudio(false);
-
-      window.speechSynthesis.speak(utterance);
-      setIsPlayingAudio(true);
+      playSpeech({
+        text: readText,
+        lang: selectedLanguage,
+        onStart: () => setIsPlayingAudio(true),
+        onEnd: () => setIsPlayingAudio(false),
+        onError: () => setIsPlayingAudio(false),
+      });
     }
   };
 
@@ -228,15 +218,18 @@ export default function ArticleReaderModal({
             </span>
           </div>
 
-          {/* Hero Image */}
-          {imageUrl && (
+          {/* Hero Image - rendered only if article has a valid image */}
+          {hasValidImage && (
             <div className="reader-image-wrap">
               <img
                 src={imageUrl}
                 alt={title}
                 className="reader-image"
-                onError={(e) => {
-                  e.target.src = '/fallback-news.svg';
+                onError={() => setImgFailed(true)}
+                onLoad={(e) => {
+                  if (!e.target.naturalWidth || e.target.naturalWidth <= 16 || !e.target.naturalHeight || e.target.naturalHeight <= 16) {
+                    setImgFailed(true);
+                  }
                 }}
               />
             </div>

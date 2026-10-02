@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Header from '@/components/Header';
+import CategoryNav from '@/components/CategoryNav';
+import DateSwitcher from '@/components/DateSwitcher';
+import NewsTicker from '@/components/NewsTicker';
 import CategorySection from '@/components/CategorySection';
 import ArticleReaderModal from '@/components/ArticleReaderModal';
 import LoadingState from '@/components/LoadingState';
@@ -17,17 +20,21 @@ const STORAGE_LANG_KEY = 'mnd_language';
 export default function HomePage() {
   const [selectedState, setSelectedState] = useState('all');
   const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [selectedDate, setSelectedDate] = useState('today');
+  const [searchQuery, setSearchQuery] = useState('');
   const [rawNewsData, setRawNewsData] = useState({});
   const [displayedNewsData, setDisplayedNewsData] = useState({});
   const [loading, setLoading] = useState(true);
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState(null);
 
+  const [activeCategory, setActiveCategory] = useState('all');
+
   // In-website Reader state
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [activeCategoryArticles, setActiveCategoryArticles] = useState([]);
 
-  // Client-side translation cache: { [state]: { [lang]: categoryNewsMap } }
+  // Client-side translation cache: { [cacheKey]: { [lang]: categoryNewsMap } }
   const translationCacheRef = useRef({});
 
   // 1. Restore persisted language preference from localStorage on mount
@@ -42,31 +49,38 @@ export default function HomePage() {
     }
   }, []);
 
-  // 2. Fetch raw English news when state changes
-  const loadNews = useCallback(async (state) => {
+  // 2. Fetch raw English news when state or date changes
+  const loadNews = useCallback(async (state, date) => {
     setLoading(true);
     setError(null);
 
+    const cacheKey = `${state}_${date}`;
+    // Check if English data is cached for this state & date
+    if (translationCacheRef.current[cacheKey] && translationCacheRef.current[cacheKey].en) {
+      setRawNewsData(translationCacheRef.current[cacheKey].en);
+      setLoading(false);
+      return;
+    }
+
     try {
-      const data = await fetchAllCategories(state, 'en');
+      const data = await fetchAllCategories(state, 'en', date);
       setRawNewsData(data);
-      // Initialize translation cache for this state with English
-      if (!translationCacheRef.current[state]) {
-        translationCacheRef.current[state] = {};
+      if (!translationCacheRef.current[cacheKey]) {
+        translationCacheRef.current[cacheKey] = {};
       }
-      translationCacheRef.current[state].en = data;
+      translationCacheRef.current[cacheKey].en = data;
     } catch (err) {
       console.error('[MND] Failed to fetch news:', err);
-      setError('Something went wrong while fetching the latest news. Please try again.');
+      setError('Something went wrong while fetching the news. Please try again.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Fetch news on mount or when state changes
+  // Fetch news on mount or when state or date changes
   useEffect(() => {
-    loadNews(selectedState);
-  }, [selectedState, loadNews]);
+    loadNews(selectedState, selectedDate);
+  }, [selectedState, selectedDate, loadNews]);
 
   // 3. Update displayed news whenever rawNewsData or selectedLanguage changes
   useEffect(() => {
@@ -79,15 +93,17 @@ export default function HomePage() {
       return;
     }
 
-    // Check client translation cache first
-    const cachedForState = translationCacheRef.current[selectedState];
-    if (cachedForState && cachedForState[selectedLanguage]) {
+    const cacheKey = `${selectedState}_${selectedDate}`;
+
+    // Check client translation cache first, ensuring it is not stale untranslated English
+    const cachedForState = translationCacheRef.current[cacheKey];
+    if (cachedForState && cachedForState[selectedLanguage]?._isTranslatedFor === selectedLanguage) {
       setDisplayedNewsData(cachedForState[selectedLanguage]);
       setIsTranslating(false);
       return;
     }
 
-    // Translate only the articles currently being displayed
+    // Translate articles currently being displayed
     let isCancelled = false;
 
     async function applyTranslation() {
@@ -128,16 +144,16 @@ export default function HomePage() {
           }
         });
 
-        // Cache the translated view for this state & language
-        if (!translationCacheRef.current[selectedState]) {
-          translationCacheRef.current[selectedState] = {};
+        // Cache the translated view for this state, date & language
+        translatedMap._isTranslatedFor = selectedLanguage;
+        if (!translationCacheRef.current[cacheKey]) {
+          translationCacheRef.current[cacheKey] = {};
         }
-        translationCacheRef.current[selectedState][selectedLanguage] = translatedMap;
+        translationCacheRef.current[cacheKey][selectedLanguage] = translatedMap;
 
         setDisplayedNewsData(translatedMap);
       } catch (transErr) {
-        console.warn('[MND] Translation failed, retaining current content:', transErr);
-        // Fallback gracefully to original English news
+        console.warn('[MND] Translation failed:', transErr);
         if (!isCancelled) {
           setDisplayedNewsData(rawNewsData);
         }
@@ -153,13 +169,69 @@ export default function HomePage() {
     return () => {
       isCancelled = true;
     };
-  }, [rawNewsData, selectedLanguage, selectedState, loading]);
+  }, [rawNewsData, selectedLanguage, selectedState, selectedDate, loading]);
+
+  // Filter news data based on search and arrange strictly by publication date (newest on top, older below)
+  const filteredNewsData = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const result = {};
+
+    CATEGORIES.forEach((cat) => {
+      let list = displayedNewsData[cat.id] || [];
+
+      if (q) {
+        list = list.filter((a) => {
+          const t = (a.title || '').toLowerCase();
+          const s = (a.summary || a.snippet || '').toLowerCase();
+          const src = (a.source || '').toLowerCase();
+          return t.includes(q) || s.includes(q) || src.includes(q);
+        });
+      }
+
+      // Strictly arrange chronologically: newest at top, older below
+      const sorted = [...list].sort((a, b) => {
+        const dateA = new Date(a.pubDate).getTime();
+        const dateB = new Date(b.pubDate).getTime();
+        if (isNaN(dateA) && isNaN(dateB)) return 0;
+        if (isNaN(dateA)) return 1;
+        if (isNaN(dateB)) return -1;
+        return dateB - dateA;
+      });
+
+      result[cat.id] = sorted;
+    });
+
+    return result;
+  }, [displayedNewsData, searchQuery]);
+
+  // Compute category article counts and flat list for ticker
+  const { categoryCounts, allFlatArticles } = useMemo(() => {
+    const counts = { all: 0 };
+    const flat = [];
+    CATEGORIES.forEach((cat) => {
+      const articles = filteredNewsData[cat.id] || [];
+      counts[cat.id] = articles.length;
+      counts.all += articles.length;
+      articles.forEach((a) => {
+        flat.push({ ...a, category: cat.id });
+      });
+    });
+
+    // Chronological order for ticker: newest first
+    flat.sort((a, b) => {
+      const dateA = new Date(a.pubDate).getTime() || 0;
+      const dateB = new Date(b.pubDate).getTime() || 0;
+      return dateB - dateA;
+    });
+
+    return { categoryCounts: counts, allFlatArticles: flat };
+  }, [filteredNewsData]);
 
   // Keep selected article in sync if translations update while reader is open
   useEffect(() => {
     if (!selectedArticle) return;
-    for (const catId of Object.keys(displayedNewsData)) {
-      const articles = displayedNewsData[catId] || [];
+    for (const catId of Object.keys(filteredNewsData)) {
+      const articles = filteredNewsData[catId] || [];
       const match = articles.find(
         (a) => (a.id && a.id === selectedArticle.id) || a.title === selectedArticle.title || a.link === selectedArticle.link
       );
@@ -169,12 +241,12 @@ export default function HomePage() {
         break;
       }
     }
-  }, [displayedNewsData]);
+  }, [filteredNewsData]);
 
   // In-website Reader Handlers
   const handleSelectArticle = (article, categoryId) => {
     setSelectedArticle(article);
-    const catList = displayedNewsData[categoryId || article.category] || [];
+    const catList = filteredNewsData[categoryId || article.category] || [];
     setActiveCategoryArticles(catList);
   };
 
@@ -221,7 +293,7 @@ export default function HomePage() {
   };
 
   const handleRetry = () => {
-    loadNews(selectedState);
+    loadNews(selectedState, selectedDate);
   };
 
   // Localized UI strings
@@ -245,6 +317,33 @@ export default function HomePage() {
         onLanguageChange={handleLanguageChange}
       />
 
+      {/* Interactive News Categories Navigation Bar */}
+      <CategoryNav
+        categories={CATEGORIES}
+        activeCategory={activeCategory}
+        onSelectCategory={setActiveCategory}
+        categoryCounts={categoryCounts}
+        selectedLanguage={selectedLanguage}
+      />
+
+      {/* Date Switcher (Back Dates & Calendar) + Search Filter & Chronological Badge */}
+      <DateSwitcher
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        selectedLanguage={selectedLanguage}
+      />
+
+      {/* Latest / Breaking News Ticker */}
+      {!loading && allFlatArticles.length > 0 && (
+        <NewsTicker
+          articles={allFlatArticles}
+          onSelectArticle={(art) => handleSelectArticle(art, art.category)}
+          selectedLanguage={selectedLanguage}
+        />
+      )}
+
       <main>
         {/* Page Title & Subtitle */}
         <div className="page-title-section">
@@ -257,7 +356,9 @@ export default function HomePage() {
             )}
           </div>
           <p className="page-subtitle">
-            {pageSubtitlePrefix} {stateLabel}
+            {selectedDate !== 'today'
+              ? getUiTranslation(selectedLanguage, 'archivedNews', { date: selectedDate })
+              : `${pageSubtitlePrefix} ${stateLabel}`}
           </p>
         </div>
 
@@ -273,14 +374,32 @@ export default function HomePage() {
           />
         )}
 
-        {/* News Categories */}
+        {/* Search Empty State */}
+        {searchQuery && allFlatArticles.length === 0 && !loading && !error && (
+          <div className="search-empty-state">
+            <p>{getUiTranslation(selectedLanguage, 'searchEmpty', { query: searchQuery })}</p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="error-retry-btn"
+              style={{ marginTop: '1rem' }}
+            >
+              {getUiTranslation(selectedLanguage, 'clearSearchFilter') || 'Clear Search Filter'}
+            </button>
+          </div>
+        )}
+
+        {/* News Categories (Filterable & Strictly Arranged by Time Published) */}
         {!loading && !error && (
           <>
-            {CATEGORIES.map((category) => (
+            {(activeCategory === 'all'
+              ? CATEGORIES
+              : CATEGORIES.filter((c) => c.id === activeCategory)
+            ).map((category) => (
               <CategorySection
                 key={category.id}
                 category={category}
-                articles={displayedNewsData[category.id] || []}
+                articles={filteredNewsData[category.id] || []}
                 loading={false}
                 selectedLanguage={selectedLanguage}
                 onSelectArticle={(art) => handleSelectArticle(art, category.id)}

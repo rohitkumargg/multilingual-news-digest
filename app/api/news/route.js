@@ -11,17 +11,55 @@
 
 import { NextResponse } from 'next/server';
 import { fetchRssCached, enrichArticleImages } from '@/lib/rss';
-import { CATEGORY_KEYWORDS, MAX_ARTICLES_PER_CATEGORY } from '@/lib/constants';
+import { CATEGORY_KEYWORDS, MAX_ARTICLES_PER_CATEGORY, isPlaceholderOrCorruptedImage } from '@/lib/constants';
 import { classifyArticle, verifyArticleCategory } from '@/lib/categorize';
 import { summarizeArticles } from '@/lib/summarize';
 import { translateBatch } from '@/lib/translate';
 import { isValidLanguageCode } from '@/lib/languages';
 
-// ─── Google News URL builders ────────────────────────────────────────────────
+// ─── Google News URL builders & Date Range Resolution ────────────────────────
 
-function buildGoogleNewsUrl(query) {
+function resolveDateRange(dateParam) {
+  if (!dateParam || dateParam === 'today' || dateParam === 'latest') {
+    return { isBackDate: false, dateSuffix: '+when:2d', targetYmd: null };
+  }
+
+  const now = new Date();
+  let target = new Date(now);
+
+  if (dateParam === 'yesterday') {
+    target.setDate(target.getDate() - 1);
+  } else if (dateParam === '2days') {
+    target.setDate(target.getDate() - 2);
+  } else if (dateParam === '3days') {
+    target.setDate(target.getDate() - 3);
+  } else if (dateParam === 'week') {
+    return { isBackDate: true, dateSuffix: '+when:7d', targetYmd: null };
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    const parsed = new Date(dateParam);
+    if (!isNaN(parsed.getTime())) target = parsed;
+  }
+
+  const targetYmd = target.toISOString().slice(0, 10);
+  const nextDay = new Date(target);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const prevDay = new Date(target);
+  prevDay.setDate(prevDay.getDate() - 1);
+
+  const beforeStr = nextDay.toISOString().slice(0, 10);
+  const afterStr = prevDay.toISOString().slice(0, 10);
+
+  return {
+    isBackDate: true,
+    dateSuffix: `+before:${beforeStr}+after:${afterStr}`,
+    targetYmd,
+  };
+}
+
+function buildGoogleNewsUrl(query, dateParam = 'today') {
+  const { dateSuffix } = resolveDateRange(dateParam);
   const encoded = encodeURIComponent(query);
-  return `https://news.google.com/rss/search?q=${encoded}+when:7d&hl=en-IN&gl=IN&ceid=IN:en`;
+  return `https://news.google.com/rss/search?q=${encoded}${dateSuffix}&hl=en-IN&gl=IN&ceid=IN:en`;
 }
 
 function buildGoogleNewsGeoUrl(state) {
@@ -90,13 +128,39 @@ const STATE_PUBLISHER_FEEDS = {
 
 // ─── Feed URL resolution ─────────────────────────────────────────────────────
 
-function getFeedUrls(category, state) {
+function getFeedUrls(category, state, dateParam = 'today') {
   const isNational = !state || state === 'all';
   const keywords = CATEGORY_KEYWORDS[category] || category;
   const feeds = [];
+  const { isBackDate } = resolveDateRange(dateParam);
+
+  // If user requested a back date, query Google News search archive with the specific date range
+  if (isBackDate) {
+    const loc = isNational ? 'India' : state;
+    feeds.push(
+      { url: buildGoogleNewsUrl(`${loc} ${keywords}`, dateParam), source: 'Google News Archive', general: false },
+      { url: buildGoogleNewsUrl(`${loc} ${category} news`, dateParam), source: 'Google News Archive', general: false }
+    );
+    return feeds;
+  }
 
   if (isNational) {
     switch (category) {
+      case 'business':
+        feeds.push(
+          { url: 'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en', source: 'Google News', general: false },
+          { url: 'https://indianexpress.com/section/business/feed/', source: 'Indian Express', general: false },
+          { url: 'https://www.thehindu.com/business/feeder/default.rss', source: 'The Hindu', general: false },
+          { url: 'https://feeds.feedburner.com/ndtvprofit-latest', source: 'NDTV Profit', general: false }
+        );
+        break;
+      case 'entertainment':
+        feeds.push(
+          { url: 'https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-IN&gl=IN&ceid=IN:en', source: 'Google News', general: false },
+          { url: 'https://indianexpress.com/section/entertainment/feed/', source: 'Indian Express', general: false },
+          { url: 'https://www.thehindu.com/entertainment/feeder/default.rss', source: 'The Hindu', general: false }
+        );
+        break;
       case 'sports':
         feeds.push(
           { url: 'https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en', source: 'Google News', general: false },
@@ -178,9 +242,10 @@ export async function GET(request) {
   const category = (searchParams.get('category') || '').toLowerCase();
   const state = searchParams.get('state') || 'all';
   const lang = (searchParams.get('lang') || 'en').toLowerCase();
+  const dateParam = (searchParams.get('date') || 'today').toLowerCase();
 
   // Validate category
-  const validCategories = ['sports', 'education', 'technology', 'politics'];
+  const validCategories = ['politics', 'business', 'technology', 'sports', 'education', 'entertainment'];
   if (!category || !validCategories.includes(category)) {
     return NextResponse.json(
       { success: false, error: `Invalid category. Must be one of: ${validCategories.join(', ')}` },
@@ -189,7 +254,7 @@ export async function GET(request) {
   }
 
   try {
-    const feedConfigs = getFeedUrls(category, state);
+    const feedConfigs = getFeedUrls(category, state, dateParam);
 
     // Fetch all feeds in parallel with error resilience
     const results = await Promise.allSettled(
@@ -227,18 +292,27 @@ export async function GET(request) {
     // Deduplicate
     allArticles = deduplicateArticles(allArticles);
 
-    // Sort: prioritize articles WITH images, then by date (newest first)
-    allArticles.sort((a, b) => {
-      const hasImageA = a.imageUrl ? 1 : 0;
-      const hasImageB = b.imageUrl ? 1 : 0;
-      if (hasImageA !== hasImageB) return hasImageB - hasImageA;
+    // Filter to target date if requested
+    const { targetYmd } = resolveDateRange(dateParam);
+    if (targetYmd) {
+      const matchingArticles = allArticles.filter((a) => {
+        if (!a.pubDate) return true;
+        const aYmd = new Date(a.pubDate).toISOString().slice(0, 10);
+        return aYmd <= targetYmd;
+      });
+      if (matchingArticles.length > 0) {
+        allArticles = matchingArticles;
+      }
+    }
 
+    // Chronological arrangement: strictly arrange newest on top, older news below
+    allArticles.sort((a, b) => {
       const dateA = new Date(a.pubDate).getTime();
       const dateB = new Date(b.pubDate).getTime();
       if (isNaN(dateA) && isNaN(dateB)) return 0;
       if (isNaN(dateA)) return 1;
       if (isNaN(dateB)) return -1;
-      return dateB - dateA;
+      return dateB - dateA; // Descending: newest published at top, older below
     });
 
     // Limit to max articles per category
@@ -301,6 +375,13 @@ export async function GET(request) {
         finalArticles = summarizedArticles;
       }
     }
+
+    // Ensure no corrupted, placeholder, or Google News self-logo images are returned
+    finalArticles.forEach((art) => {
+      if (art.imageUrl && isPlaceholderOrCorruptedImage(art.imageUrl)) {
+        art.imageUrl = null;
+      }
+    });
 
     return NextResponse.json({
       success: true,

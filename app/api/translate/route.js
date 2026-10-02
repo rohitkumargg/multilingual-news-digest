@@ -73,6 +73,10 @@ export async function POST(request) {
           textItems.push(art.summary);
           itemMap.push({ index, field: 'summary' });
         }
+        if (art.snippet) {
+          textItems.push(art.snippet);
+          itemMap.push({ index, field: 'snippet' });
+        }
         if (art.fullStory) {
           textItems.push(art.fullStory);
           itemMap.push({ index, field: 'fullStory' });
