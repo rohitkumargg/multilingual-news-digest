@@ -60,49 +60,80 @@ export async function POST(request) {
 
     // 1. Articles batch mode
     if (Array.isArray(articles)) {
-      // Flatten titles and summaries into a single list to translate efficiently
-      const textItems = [];
-      const itemMap = [];
+      // Flatten only needed card fields (title, summary, highlights[1..]) and deduplicate identical strings
+      const uniqueTexts = [];
+      const textToUniqueIdx = new Map();
+      const targetMappings = []; // targetMappings[uIdx] = array of { index, field, hIdx }
+
+      function registerText(val, target) {
+        if (!val || typeof val !== 'string') return;
+        const trimmed = val.trim();
+        if (!trimmed) return;
+
+        let uIdx = textToUniqueIdx.get(trimmed);
+        if (uIdx === undefined) {
+          uIdx = uniqueTexts.length;
+          textToUniqueIdx.set(trimmed, uIdx);
+          uniqueTexts.push(trimmed);
+          targetMappings.push([]);
+        }
+        targetMappings[uIdx].push(target);
+      }
 
       articles.forEach((art, index) => {
         if (art.title) {
-          textItems.push(art.title);
-          itemMap.push({ index, field: 'title' });
+          registerText(art.title, { index, field: 'title' });
         }
-        if (art.summary) {
-          textItems.push(art.summary);
-          itemMap.push({ index, field: 'summary' });
+
+        const hasUsableSummary = Boolean(
+          art.summary && typeof art.summary === 'string' && art.summary.trim().length > 0
+        );
+
+        if (hasUsableSummary) {
+          registerText(art.summary, { index, field: 'summary' });
+        } else if (art.snippet && typeof art.snippet === 'string' && art.snippet.trim().length > 0) {
+          // Translate snippet ONLY when article does not have a usable summary
+          registerText(art.snippet, { index, field: 'snippet' });
         }
-        if (art.snippet) {
-          textItems.push(art.snippet);
-          itemMap.push({ index, field: 'snippet' });
-        }
-        if (art.fullStory) {
-          textItems.push(art.fullStory);
-          itemMap.push({ index, field: 'fullStory' });
-        }
+
+        // Do NOT send fullStory for initial translation
+        // Include highlights: highlights[0] reuses title translation without extra API requests
         if (Array.isArray(art.highlights)) {
           art.highlights.forEach((h, hIdx) => {
-            textItems.push(h);
-            itemMap.push({ index, field: 'highlights', hIdx });
+            if (hIdx === 0) {
+              const textToUse = art.title || h;
+              if (textToUse) {
+                registerText(textToUse, { index, field: 'highlights', hIdx });
+              }
+              return;
+            }
+            if (h) {
+              registerText(h, { index, field: 'highlights', hIdx });
+            }
           });
         }
       });
 
-      const translatedItems = await translateBatch(textItems, cleanTargetLang);
+      const translatedUniqueItems = await translateBatch(uniqueTexts, cleanTargetLang);
 
-      // Clone original articles
+      // Clone original articles, preserving original English fullStory
       const translatedArticles = articles.map((a) => ({
         ...a,
         highlights: Array.isArray(a.highlights) ? [...a.highlights] : [],
       }));
 
-      itemMap.forEach(({ index, field, hIdx }, i) => {
-        if (field === 'highlights') {
-          translatedArticles[index].highlights[hIdx] = translatedItems[i] || articles[index].highlights[hIdx];
-        } else {
-          translatedArticles[index][field] = translatedItems[i] || articles[index][field];
-        }
+      // Map translated results back to every place where that string occurred
+      targetMappings.forEach((targets, uIdx) => {
+        const translated = translatedUniqueItems[uIdx];
+        if (!translated) return;
+
+        targets.forEach(({ index, field, hIdx }) => {
+          if (field === 'highlights') {
+            translatedArticles[index].highlights[hIdx] = translated;
+          } else {
+            translatedArticles[index][field] = translated;
+          }
+        });
       });
 
       return NextResponse.json({
@@ -114,7 +145,49 @@ export async function POST(request) {
 
     // 2. Texts array mode
     if (Array.isArray(texts)) {
-      const translatedTexts = await translateBatch(texts, cleanTargetLang);
+      // Step 1 & 2: Validate and deduplicate `texts`, building `uniqueTexts` and `occurrenceIndices`
+      const uniqueTexts = [];
+      const textToUniqueIdx = new Map();
+      const occurrenceIndices = [];
+
+      texts.forEach((t) => {
+        if (!t || typeof t !== 'string') {
+          occurrenceIndices.push(-1);
+          return;
+        }
+        const trimmed = t.trim();
+        if (!trimmed) {
+          occurrenceIndices.push(-1);
+          return;
+        }
+        let uIdx = textToUniqueIdx.get(trimmed);
+        if (uIdx === undefined) {
+          uIdx = uniqueTexts.length;
+          textToUniqueIdx.set(trimmed, uIdx);
+          uniqueTexts.push(trimmed);
+        }
+        occurrenceIndices.push(uIdx);
+      });
+
+      if (uniqueTexts.length === 0) {
+        return NextResponse.json({
+          success: true,
+          targetLanguage: cleanTargetLang,
+          translatedTexts: texts,
+        });
+      }
+
+      // Step 3: Call translateBatch(uniqueTexts, cleanTargetLang) exactly once
+      const translatedUnique = await translateBatch(uniqueTexts, cleanTargetLang);
+
+      // Step 4: Reconstruct translatedTexts using occurrenceIndices
+      const translatedTexts = texts.map((original, i) => {
+        const uIdx = occurrenceIndices[i];
+        if (uIdx === -1 || uIdx === undefined) return original;
+        return translatedUnique[uIdx] || original;
+      });
+
+      // Step 5: Return the result
       return NextResponse.json({
         success: true,
         targetLanguage: cleanTargetLang,
