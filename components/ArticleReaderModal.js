@@ -5,6 +5,9 @@ import { formatLocalizedRelativeDate, getUiTranslation, UI_TRANSLATIONS } from '
 import { isPlaceholderOrCorruptedImage } from '@/lib/constants';
 import { playSpeech, stopSpeech } from '@/lib/speaker';
 
+// Module-level client cache for on-demand fullStory translations across modal sessions
+const fullStoryCache = new Map();
+
 export default function ArticleReaderModal({
   article,
   selectedLanguage = 'en',
@@ -16,6 +19,8 @@ export default function ArticleReaderModal({
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  const [translatedStoryText, setTranslatedStoryText] = useState(null);
+  const [isLoadingStory, setIsLoadingStory] = useState(false);
 
   useEffect(() => {
     setImgFailed(false);
@@ -54,6 +59,82 @@ export default function ArticleReaderModal({
     };
   }, [onClose, onNavigate, hasPrev, hasNext, stopAudio]);
 
+  // On-demand fullStory translation when modal opens in a non-English language
+  const articleKey = article?.id || article?.link || article?.title;
+  const cacheKey = articleKey && selectedLanguage !== 'en' ? `${articleKey}_${selectedLanguage}` : null;
+
+  useEffect(() => {
+    // If English, no translation needed
+    if (!article || selectedLanguage === 'en') {
+      setTranslatedStoryText(null);
+      setIsLoadingStory(false);
+      return;
+    }
+
+    const storyToTranslate = article.fullStory || article.summary || article.snippet;
+    if (!storyToTranslate || typeof storyToTranslate !== 'string' || !storyToTranslate.trim()) {
+      setTranslatedStoryText(null);
+      setIsLoadingStory(false);
+      return;
+    }
+
+    // Check client-side cache
+    if (cacheKey && fullStoryCache.has(cacheKey)) {
+      setTranslatedStoryText(fullStoryCache.get(cacheKey));
+      setIsLoadingStory(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoadingStory(true);
+
+    async function fetchFullStory() {
+      try {
+        const res = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: storyToTranslate,
+            targetLanguage: selectedLanguage,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const translated = data?.translatedText;
+
+        if (!isCancelled) {
+          if (translated && typeof translated === 'string' && translated.trim().length > 0) {
+            if (cacheKey) {
+              fullStoryCache.set(cacheKey, translated);
+            }
+            setTranslatedStoryText(translated);
+          } else {
+            setTranslatedStoryText(storyToTranslate);
+          }
+        }
+      } catch (err) {
+        console.warn('[ArticleReader] Failed to translate full story on-demand:', err);
+        if (!isCancelled) {
+          setTranslatedStoryText(storyToTranslate);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingStory(false);
+        }
+      }
+    }
+
+    fetchFullStory();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [article?.id, article?.link, article?.title, article?.fullStory, article?.summary, article?.snippet, selectedLanguage, cacheKey]);
+
   if (!article) return null;
 
   const { title, imageUrl, summary, snippet, fullStory, highlights, source, pubDate, category } = article;
@@ -78,7 +159,11 @@ export default function ArticleReaderModal({
   const importedFromLabel = getUiTranslation(selectedLanguage, 'importedFrom') || 'Imported from';
   const inWebsiteNotice = getUiTranslation(selectedLanguage, 'inWebsiteNotice') || 'Viewed in MND • No external redirect';
 
-  const storyParagraphs = (fullStory || summary || snippet || '')
+  const activeStory = selectedLanguage === 'en'
+    ? (fullStory || summary || snippet || '')
+    : (translatedStoryText || fullStory || summary || snippet || '');
+
+  const storyParagraphs = activeStory
     .split('\n\n')
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
@@ -256,13 +341,29 @@ export default function ArticleReaderModal({
             <div className="reader-section-header">
               <span className="reader-story-icon">📰</span>
               <h2 className="reader-section-title">{fullStoryLabel}</h2>
+              {isLoadingStory && (
+                <span className="translating-indicator" style={{ marginLeft: '0.6rem' }} aria-label="Translating story">
+                  <span className="translating-spinner"></span>
+                </span>
+              )}
             </div>
             <div className="reader-story-paragraphs">
-              {storyParagraphs.map((paragraph, index) => (
-                <p key={index} className="reader-story-p">
-                  {paragraph}
-                </p>
-              ))}
+              {isLoadingStory ? (
+                <div className="reader-story-loading" aria-live="polite" style={{ padding: '0.5rem 0' }}>
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '100%', marginBottom: '12px', opacity: 0.7 }} />
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '94%', marginBottom: '12px', opacity: 0.7 }} />
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '97%', marginBottom: '20px', opacity: 0.7 }} />
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '90%', marginBottom: '12px', opacity: 0.7 }} />
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '93%', marginBottom: '12px', opacity: 0.7 }} />
+                  <div style={{ background: 'var(--border-subtle, #e2e8f0)', borderRadius: '4px', height: '14px', width: '68%', opacity: 0.7 }} />
+                </div>
+              ) : (
+                storyParagraphs.map((paragraph, index) => (
+                  <p key={index} className="reader-story-p">
+                    {paragraph}
+                  </p>
+                ))
+              )}
             </div>
           </section>
         </div>
