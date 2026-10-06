@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-06T16:03:28.941Z",
+  "profileInit": "idle",
+  "attribution": {
+    "status": "broken",
+    "confidence": 0.35,
+    "reliable": false
+  },
+  "hooks": {
+    "installed": true,
+    "allConfigured": false,
+    "lastSync": "2026-10-06T16:03:28.941Z"
+  },
+  "capabilities": {
+    "claude": {
+      "supportsHooks": true,
+      "supportsTokens": true,
+      "supportsTranscripts": true,
+      "hookConfigured": false,
+      "format": "skill-md"
+    },
+    "cursor": {
+      "supportsHooks": true,
+      "supportsTokens": true,
+      "supportsTranscripts": true,
+      "hookConfigured": true,
+      "format": "skill-md"
+    },
+    "kiro": {
+      "supportsHooks": true,
+      "supportsTokens": false,
+      "supportsTranscripts": false,
+      "hookConfigured": true,
+      "format": "skill-md"
+    },
+    "copilot": {
+      "supportsHooks": true,
+      "supportsTokens": false,
+      "supportsTranscripts": false,
+      "hookConfigured": true,
+      "format": "copilot-instructions"
+    }
+  },
+  "lastCycle": {
+    "collectedAt": "2026-10-06T16:03:22.788Z",
+    "attributionMtime": 1791302602788.5054,
+    "circuitOpen": false,
+    "runsLastMinute": 1,
+    "indexedAt": "2026-10-06T16:03:28.914Z",
+    "runsFileMtime": 0,
+    "runsFileSize": 0,
+    "analyzedAt": "2026-10-06T16:03:28.941Z",
+    "trace": {
+      "errors": [],
+      "indexMs": 3,
+      "analyzeMs": 23,
+      "totalMs": 26,
+      "lastCompletedAt": "2026-10-06T08:46:11.560Z"
+    }
+  },
+  "systemMode": "safe"
+}
