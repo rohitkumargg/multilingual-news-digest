@@ -315,6 +315,10 @@ export default function HomePage() {
         onStateChange={handleStateChange}
         selectedLanguage={selectedLanguage}
         onLanguageChange={handleLanguageChange}
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
 
       {/* Interactive News Categories Navigation Bar */}
@@ -326,23 +330,20 @@ export default function HomePage() {
         selectedLanguage={selectedLanguage}
       />
 
-      {/* Date Switcher (Back Dates & Calendar) + Search Filter & Chronological Badge */}
-      <DateSwitcher
-        selectedDate={selectedDate}
-        onSelectDate={setSelectedDate}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        selectedLanguage={selectedLanguage}
-      />
-
-      {/* Latest / Breaking News Ticker */}
+      {/* Latest / Breaking News Ticker (marquee) */}
       {!loading && allFlatArticles.length > 0 && (
         <NewsTicker
           articles={allFlatArticles}
-          onSelectArticle={(art) => handleSelectArticle(art, art.category)}
           selectedLanguage={selectedLanguage}
         />
       )}
+
+      {/* Archive date banner (only shown when viewing past dates) */}
+      <DateSwitcher
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        selectedLanguage={selectedLanguage}
+      />
 
       <main>
         {/* Page Title & Subtitle */}

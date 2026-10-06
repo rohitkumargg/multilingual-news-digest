@@ -1,87 +1,56 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+/**
+ * NewsTicker — CSS marquee, scrolls right→left automatically.
+ * Each headline is a real <a> hyperlink opening the source URL.
+ * Hover to pause.
+ */
+
 import { getUiTranslation } from '@/lib/translations';
 
-export default function NewsTicker({ articles = [], onSelectArticle, selectedLanguage = 'en' }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-
-  const tickerBadge = getUiTranslation(selectedLanguage, 'trendingNews') || 'Latest Updates';
-  const tickerAriaText = getUiTranslation(selectedLanguage, 'tickerAria') || 'Breaking and Latest News Ticker';
-  const prevHeadlineText = getUiTranslation(selectedLanguage, 'prevHeadline') || 'Previous headline';
-  const nextHeadlineText = getUiTranslation(selectedLanguage, 'nextHeadline') || 'Next headline';
-  const defaultSourceText = getUiTranslation(selectedLanguage, 'unknownSource') || 'News';
-
-  useEffect(() => {
-    if (articles.length <= 1 || isPaused) return;
-
-    const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % articles.length);
-    }, 4500);
-
-    return () => clearInterval(timer);
-  }, [articles.length, isPaused]);
-
+export default function NewsTicker({ articles = [], selectedLanguage = 'en' }) {
   if (!articles || articles.length === 0) return null;
 
-  const currentArticle = articles[currentIndex];
-  if (!currentArticle) return null;
+  const tickerBadge = getUiTranslation(selectedLanguage, 'trendingNews') || 'Latest';
+  const tickerAriaText = getUiTranslation(selectedLanguage, 'tickerAria') || 'Latest news ticker';
+  const defaultSourceText = getUiTranslation(selectedLanguage, 'unknownSource') || 'News';
 
-  const handlePrev = (e) => {
-    e.stopPropagation();
-    setCurrentIndex((prev) => (prev - 1 + articles.length) % articles.length);
-  };
-
-  const handleNext = (e) => {
-    e.stopPropagation();
-    setCurrentIndex((prev) => (prev + 1) % articles.length);
-  };
+  // Cap at 20 items; duplicate for seamless loop
+  const items = articles.slice(0, 20);
 
   return (
     <div
       className="news-ticker-container"
-      onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
       role="region"
       aria-label={tickerAriaText}
     >
       <div className="news-ticker-inner">
-        <div className="news-ticker-label">
-          <span className="ticker-live-dot" aria-hidden="true"></span>
-          <span className="ticker-label-text">{tickerBadge}</span>
-        </div>
+        <span className="news-ticker-label" aria-hidden="true">
+          <span className="ticker-live-dot" />
+          {tickerBadge}
+        </span>
 
-        <button
-          type="button"
-          className="news-ticker-headline-btn"
-          onClick={() => onSelectArticle && onSelectArticle(currentArticle)}
-          title={currentArticle.title}
-        >
-          <span className="ticker-source-tag">{currentArticle.source || defaultSourceText}</span>
-          <span className="ticker-headline-text">{currentArticle.title}</span>
-        </button>
-
-        <div className="news-ticker-controls">
-          <span className="ticker-counter">
-            {currentIndex + 1} / {articles.length}
-          </span>
-          <button
-            type="button"
-            className="ticker-nav-btn"
-            onClick={handlePrev}
-            aria-label={prevHeadlineText}
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            className="ticker-nav-btn"
-            onClick={handleNext}
-            aria-label={nextHeadlineText}
-          >
-            ›
-          </button>
+        {/* Marquee track — overflow hidden wrapper */}
+        <div className="ticker-track-wrapper">
+          <div className="ticker-track">
+            {/* Render twice for seamless infinite loop */}
+            {[...items, ...items].map((article, i) => (
+              <a
+                key={i}
+                href={article.link || '#'}
+                target={article.link ? '_blank' : undefined}
+                rel="noopener noreferrer"
+                className="ticker-item"
+                aria-label={article.title}
+              >
+                <span className="ticker-source-tag">
+                  {article.source || defaultSourceText}
+                </span>
+                <span className="ticker-headline-text">{article.title}</span>
+                <span className="ticker-sep" aria-hidden="true">·</span>
+              </a>
+            ))}
+          </div>
         </div>
       </div>
     </div>
