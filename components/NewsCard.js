@@ -4,12 +4,16 @@ import { useState, useEffect } from 'react';
 import { formatLocalizedRelativeDate, getUiTranslation, UI_TRANSLATIONS } from '@/lib/translations';
 import { isPlaceholderOrCorruptedImage } from '@/lib/constants';
 import { playSpeech, stopSpeech } from '@/lib/speaker';
+import ShareButton from './ShareButton';
 
 export default function NewsCard({
   article,
   selectedLanguage = 'en',
   onSelectArticle,
   isLead = false,
+  onSaveArticle,
+  isSaved = false,
+  onRequestAuth,
 }) {
   const { title, imageUrl, summary, snippet, highlights, source, pubDate, category } = article;
   const [isPlaying, setIsPlaying] = useState(false);
@@ -39,6 +43,7 @@ export default function NewsCard({
   const leadBadgeText = getUiTranslation(selectedLanguage, 'leadStory') || 'Lead Story';
   const readTimeText = getUiTranslation(selectedLanguage, 'readTime', { n: readMinutes }) || `${readMinutes}m read`;
   const estimatedReadingTimeText = getUiTranslation(selectedLanguage, 'estimatedReadingTime') || 'Estimated reading time';
+  const shareText = getUiTranslation(selectedLanguage, 'share') || 'Share';
 
   const categoryLabel = category
     ? UI_TRANSLATIONS[selectedLanguage]?.categories?.[category] ||
@@ -62,6 +67,15 @@ export default function NewsCard({
         onEnd: () => setIsPlaying(false),
         onError: () => setIsPlaying(false),
       });
+    }
+  };
+
+  const handleBookmarkClick = (e) => {
+    e.stopPropagation();
+    if (onRequestAuth) {
+      onRequestAuth();
+    } else if (onSaveArticle) {
+      onSaveArticle(article);
     }
   };
 
@@ -213,6 +227,34 @@ export default function NewsCard({
               </>
             )}
           </button>
+
+          <button
+            type="button"
+            className={`news-card-bookmark-btn bookmark-btn ${isSaved ? 'saved' : ''}`}
+            onClick={handleBookmarkClick}
+            title={isSaved ? 'Remove from saved' : 'Save article'}
+            aria-label={isSaved ? 'Remove saved article' : 'Save article'}
+          >
+            {isSaved ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            )}
+            <span className="bookmark-btn-label">{isSaved ? 'Saved' : 'Save'}</span>
+          </button>
+
+          <ShareButton
+            variant="card"
+            url={article.link}
+            title={title}
+            text={displaySummary}
+            articleTitle={title}
+            shareLabel={shareText}
+          />
         </div>
       </div>
     </article>

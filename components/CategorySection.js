@@ -1,6 +1,7 @@
 'use client';
 
 import NewsCard from './NewsCard';
+import ShareButton from './ShareButton';
 import { UI_TRANSLATIONS, getUiTranslation } from '@/lib/translations';
 
 export default function CategorySection({
@@ -9,6 +10,9 @@ export default function CategorySection({
   loading = false,
   selectedLanguage = 'en',
   onSelectArticle,
+  onSaveArticle,
+  savedArticleIds,
+  onRequestAuth,
 }) {
   const categoryLabel =
     UI_TRANSLATIONS[selectedLanguage]?.categories?.[category.id] ||
@@ -33,6 +37,12 @@ export default function CategorySection({
           )}
         </div>
         <div className="category-header-line" aria-hidden="true"></div>
+        <ShareButton
+          variant="category"
+          url={typeof window !== 'undefined' ? `${window.location.origin}/#category-${category.id}` : `/#category-${category.id}`}
+          title={`MND — ${categoryLabel} News`}
+          categoryLabel={categoryLabel}
+        />
       </div>
 
       {loading ? (
@@ -51,6 +61,15 @@ export default function CategorySection({
               selectedLanguage={selectedLanguage}
               onSelectArticle={onSelectArticle}
               isLead={true}
+              onSaveArticle={onSaveArticle}
+              isSaved={Boolean(
+                savedArticleIds &&
+                articles[0]?.stableId &&
+                (savedArticleIds instanceof Set
+                  ? savedArticleIds.has(articles[0].stableId)
+                  : Array.isArray(savedArticleIds) && savedArticleIds.includes(articles[0].stableId))
+              )}
+              onRequestAuth={onRequestAuth}
             />
           </div>
 
@@ -64,6 +83,15 @@ export default function CategorySection({
                   selectedLanguage={selectedLanguage}
                   onSelectArticle={onSelectArticle}
                   isLead={false}
+                  onSaveArticle={onSaveArticle}
+                  isSaved={Boolean(
+                    savedArticleIds &&
+                    article?.stableId &&
+                    (savedArticleIds instanceof Set
+                      ? savedArticleIds.has(article.stableId)
+                      : Array.isArray(savedArticleIds) && savedArticleIds.includes(article.stableId))
+                  )}
+                  onRequestAuth={onRequestAuth}
                 />
               ))}
             </div>

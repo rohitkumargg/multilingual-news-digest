@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { formatLocalizedRelativeDate, getUiTranslation, UI_TRANSLATIONS } from '@/lib/translations';
 import { isPlaceholderOrCorruptedImage } from '@/lib/constants';
 import { playSpeech, stopSpeech } from '@/lib/speaker';
+import ShareButton from './ShareButton';
 
 // Module-level client cache for on-demand fullStory translations across modal sessions
 const fullStoryCache = new Map();
@@ -156,6 +157,7 @@ export default function ArticleReaderModal({
   const stopAudioLabel = getUiTranslation(selectedLanguage, 'stopAudio') || 'Stop';
   const copyLabel = getUiTranslation(selectedLanguage, 'copySummary') || 'Copy';
   const copiedLabel = getUiTranslation(selectedLanguage, 'copiedSummary') || 'Copied!';
+  const shareLabel = getUiTranslation(selectedLanguage, 'share') || 'Share';
   const importedFromLabel = getUiTranslation(selectedLanguage, 'importedFrom') || 'Imported from';
   const inWebsiteNotice = getUiTranslation(selectedLanguage, 'inWebsiteNotice') || 'Viewed in MND • No external redirect';
 
@@ -270,6 +272,15 @@ export default function ArticleReaderModal({
               </svg>
               <span>{isCopied ? copiedLabel : copyLabel}</span>
             </button>
+
+            <ShareButton
+              variant="reader"
+              url={article.link}
+              title={title}
+              text={summary || snippet}
+              articleTitle={title}
+              shareLabel={shareLabel}
+            />
 
             <button
               type="button"

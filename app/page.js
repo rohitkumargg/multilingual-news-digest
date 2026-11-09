@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSession } from 'next-auth/react';
 import Header from '@/components/Header';
 import CategoryNav from '@/components/CategoryNav';
 import DateSwitcher from '@/components/DateSwitcher';
@@ -10,6 +11,10 @@ import ArticleReaderModal from '@/components/ArticleReaderModal';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import Footer from '@/components/Footer';
+import AuthModal from '@/components/AuthModal';
+import StreakPopup from '@/components/StreakPopup';
+import ProfilePanel from '@/components/ProfilePanel';
+import FeedbackModal from '@/components/FeedbackModal';
 import { CATEGORIES, INDIAN_STATES } from '@/lib/constants';
 import { fetchAllCategories, translateArticles } from '@/lib/fetchNews';
 import { UI_TRANSLATIONS, getUiTranslation } from '@/lib/translations';
@@ -34,6 +39,171 @@ export default function HomePage() {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [activeCategoryArticles, setActiveCategoryArticles] = useState([]);
 
+  // Authentication Modal state
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState('login');
+
+  // Feedback Modal state (§7, §16, §22)
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+
+  const handleOpenFeedback = useCallback(() => {
+    setIsFeedbackModalOpen(true);
+  }, []);
+
+  const handleCloseFeedback = useCallback(() => {
+    setIsFeedbackModalOpen(false);
+  }, []);
+
+  // Notification popup state (Auth & Streak)
+  const [activeNotification, setActiveNotification] = useState(null);
+
+  // Profile Panel & Saved Articles state (§10, §13, §16, §22)
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [savedArticleIds, setSavedArticleIds] = useState(new Set());
+  const { data: session, status: authStatus } = useSession();
+
+  const handleOpenAuth = useCallback((tab = 'login') => {
+    setAuthModalTab(tab);
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const handleCloseAuth = useCallback(() => {
+    setIsAuthModalOpen(false);
+  }, []);
+
+  const fetchSavedArticleIds = useCallback(async () => {
+    if (authStatus !== 'authenticated') {
+      setSavedArticleIds(new Set());
+      return;
+    }
+    try {
+      const res = await fetch('/api/user/saved?limit=100');
+      if (res.ok) {
+        const data = await res.json();
+        const ids = new Set((data.articles || []).map((a) => a.stableId));
+        setSavedArticleIds(ids);
+      }
+    } catch (err) {
+      console.warn('[Page] Failed to fetch saved article IDs:', err);
+    }
+  }, [authStatus]);
+
+  useEffect(() => {
+    fetchSavedArticleIds();
+  }, [fetchSavedArticleIds]);
+
+  const handleLoginSuccess = useCallback((authInfo) => {
+    const streakData = authInfo?.streakData || (authInfo?.type ? authInfo : null);
+    const authData = authInfo?.email
+      ? authInfo
+      : (authInfo?.isNewAccount !== undefined ? authInfo : { isLogin: true });
+
+    setActiveNotification({
+      authData,
+      streakData,
+    });
+    fetchSavedArticleIds();
+  }, [fetchSavedArticleIds]);
+
+  const handleCloseNotification = useCallback(() => {
+    setActiveNotification(null);
+  }, []);
+
+  const handleOpenProfile = useCallback(() => {
+    if (authStatus === 'authenticated') {
+      setIsProfileOpen(true);
+    } else {
+      handleOpenAuth('login');
+    }
+  }, [authStatus, handleOpenAuth]);
+
+  const handleSaveArticle = useCallback(
+    async (article) => {
+      if (authStatus !== 'authenticated') {
+        handleOpenAuth('login');
+        return;
+      }
+
+      const stableId = article?.stableId;
+      if (!stableId) {
+        alert('This article cannot be bookmarked because it lacks a valid canonical URL.');
+        return;
+      }
+
+      const isCurrentlySaved = savedArticleIds.has(stableId);
+
+      if (isCurrentlySaved) {
+        // Optimistic UI unsave
+        setSavedArticleIds((prev) => {
+          const next = new Set(prev);
+          next.delete(stableId);
+          return next;
+        });
+
+        try {
+          const res = await fetch(`/api/user/saved/${stableId}`, {
+            method: 'DELETE',
+          });
+          if (!res.ok) {
+            // Revert on error
+            setSavedArticleIds((prev) => new Set(prev).add(stableId));
+            alert('Failed to remove saved article.');
+          }
+        } catch (err) {
+          setSavedArticleIds((prev) => new Set(prev).add(stableId));
+          alert('Network error removing saved article.');
+        }
+      } else {
+        // Optimistic UI save
+        setSavedArticleIds((prev) => new Set(prev).add(stableId));
+
+        try {
+          const res = await fetch('/api/user/saved', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              stableId,
+              link: article.link,
+              title: article.title,
+              source: article.source,
+              imageUrl: article.imageUrl,
+              summary: article.summary || article.snippet,
+              category: article.category,
+              pubDate: article.pubDate,
+            }),
+          });
+
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            // Revert on error
+            setSavedArticleIds((prev) => {
+              const next = new Set(prev);
+              next.delete(stableId);
+              return next;
+            });
+            alert(data.error || 'Failed to save article.');
+          }
+        } catch (err) {
+          setSavedArticleIds((prev) => {
+            const next = new Set(prev);
+            next.delete(stableId);
+            return next;
+          });
+          alert('Network error saving article.');
+        }
+      }
+    },
+    [authStatus, handleOpenAuth, savedArticleIds]
+  );
+
+  const handleUnsaveArticle = useCallback((stableId) => {
+    setSavedArticleIds((prev) => {
+      const next = new Set(prev);
+      next.delete(stableId);
+      return next;
+    });
+  }, []);
+
   // Client-side translation cache: { [cacheKey]: { [lang]: categoryNewsMap } }
   const translationCacheRef = useRef({});
 
@@ -48,6 +218,49 @@ export default function HomePage() {
       // localStorage may fail in restricted/private contexts
     }
   }, []);
+
+  // ─── Phase 5: Hash-Based Category Deep Linking (§8, §22) ───────────────────
+  // Effect 1: Parse hash on mount and synchronize on hashchange events
+  useEffect(() => {
+    const syncCategoryFromHash = () => {
+      if (typeof window === 'undefined') return;
+      const hash = window.location.hash; // e.g. "#category-politics"
+      if (!hash || hash === '#' || hash === '#all') {
+        setActiveCategory('all');
+        return;
+      }
+      const match = hash.match(/^#category-(.+)$/);
+      if (match) {
+        const catId = match[1];
+        const valid = CATEGORIES.find((c) => c.id === catId);
+        if (valid) setActiveCategory(catId);
+      }
+    };
+
+    syncCategoryFromHash();
+    window.addEventListener('hashchange', syncCategoryFromHash);
+    return () => window.removeEventListener('hashchange', syncCategoryFromHash);
+  }, []);
+
+  // Effect 2: Scroll to category section once news data is available (handles async load)
+  const initialHashScrolled = useRef(false);
+  useEffect(() => {
+    if (initialHashScrolled.current) return; // already scrolled on initial load
+    if (loading || Object.keys(displayedNewsData).length === 0) return; // data not yet available
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    const match = hash.match(/^#category-(.+)$/);
+    if (!match) return;
+    const catId = match[1];
+    const valid = CATEGORIES.find((c) => c.id === catId);
+    if (!valid) return;
+    const el = document.getElementById(`category-${catId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      initialHashScrolled.current = true;
+    }
+  }, [loading, displayedNewsData]);
 
   // 2. Fetch raw English news when state or date changes
   const loadNews = useCallback(async (state, date) => {
@@ -315,6 +528,9 @@ export default function HomePage() {
         onStateChange={handleStateChange}
         selectedLanguage={selectedLanguage}
         onLanguageChange={handleLanguageChange}
+        onAuthClick={() => handleOpenAuth('login')}
+        onProfileClick={handleOpenProfile}
+        onFeedbackClick={handleOpenFeedback}
       />
 
       {/* Interactive News Categories Navigation Bar */}
@@ -403,6 +619,9 @@ export default function HomePage() {
                 loading={false}
                 selectedLanguage={selectedLanguage}
                 onSelectArticle={(art) => handleSelectArticle(art, category.id)}
+                onSaveArticle={handleSaveArticle}
+                savedArticleIds={savedArticleIds}
+                onRequestAuth={authStatus !== 'authenticated' ? () => handleOpenAuth('login') : undefined}
               />
             ))}
           </>
@@ -421,7 +640,40 @@ export default function HomePage() {
         />
       )}
 
-      <Footer selectedLanguage={selectedLanguage} />
+      <Footer
+        selectedLanguage={selectedLanguage}
+        onAuthClick={() => handleOpenAuth('login')}
+        onProfileClick={handleOpenProfile}
+        onFeedbackClick={handleOpenFeedback}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={handleCloseAuth}
+        initialTab={authModalTab}
+        onLoginSuccess={handleLoginSuccess}
+      />
+
+      <ProfilePanel
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        selectedLanguage={selectedLanguage}
+        onSelectArticle={(art) => setSelectedArticle(art)}
+        onUnsaveArticle={handleUnsaveArticle}
+      />
+
+      <FeedbackModal
+        isOpen={isFeedbackModalOpen}
+        onClose={handleCloseFeedback}
+      />
+
+      {activeNotification && (
+        <StreakPopup
+          streakData={activeNotification.streakData}
+          authData={activeNotification.authData}
+          onClose={handleCloseNotification}
+        />
+      )}
     </>
   );
 }

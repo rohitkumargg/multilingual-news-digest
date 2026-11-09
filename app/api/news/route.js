@@ -16,6 +16,7 @@ import { classifyArticle, verifyArticleCategory } from '@/lib/categorize';
 import { summarizeArticles } from '@/lib/summarize';
 import { translateBatch } from '@/lib/translate';
 import { isValidLanguageCode } from '@/lib/languages';
+import { stableArticleId } from '@/lib/articleId';
 
 // ─── Google News URL builders & Date Range Resolution ────────────────────────
 
@@ -377,7 +378,9 @@ export async function GET(request) {
     }
 
     // Ensure no corrupted, placeholder, or Google News self-logo images are returned
+    // and attach server-authoritative stableArticleId (§13, §16, §22)
     finalArticles.forEach((art) => {
+      art.stableId = stableArticleId(art);
       if (art.imageUrl && isPlaceholderOrCorruptedImage(art.imageUrl)) {
         art.imageUrl = null;
       }

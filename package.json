@@ -5,13 +5,28 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --import ./scratch/register_hooks.mjs --test lib/streakLogic.test.js lib/articleId.test.js lib/authAndSavedValidation.test.js lib/routeHandlers.test.js && node scratch/test_feedback_suite.mjs",
+    "test:unit": "node --import ./scratch/register_hooks.mjs --test lib/streakLogic.test.js lib/articleId.test.js lib/authAndSavedValidation.test.js lib/routeHandlers.test.js",
+    "test:routes": "node --import ./scratch/register_hooks.mjs --test lib/routeHandlers.test.js",
+    "test:feedback": "node scratch/test_feedback_suite.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.4",
     "next": "16.3.3",
+    "next-auth": "^5.0.0-beta.32",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "resend": "^6.32.1",
     "rss-parser": "^3.13.0",
     "sanitize-html": "^2.17.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11"
   }
 }

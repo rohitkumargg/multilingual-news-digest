@@ -74,6 +74,8 @@ export default function DateSwitcher({
           <div className="search-filter-box">
             <span className="search-icon" aria-hidden="true">🔍</span>
             <input
+              id="news-search-input"
+              name="search"
               type="text"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}

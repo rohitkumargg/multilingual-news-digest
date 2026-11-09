@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 import StateSelector from './StateSelector';
 import LanguageSelector from './LanguageSelector';
+import ShareButton from './ShareButton';
 import { getUiTranslation } from '@/lib/translations';
 
 export default function Header({
@@ -10,7 +12,11 @@ export default function Header({
   onStateChange,
   selectedLanguage = 'en',
   onLanguageChange,
+  onAuthClick,
+  onProfileClick,
+  onFeedbackClick,
 }) {
+  const { data: session, status } = useSession();
   const tagline = getUiTranslation(selectedLanguage, 'appTagline') || 'Multilingual News Digest';
   const editionText = getUiTranslation(selectedLanguage, 'edition') || 'India Edition';
   const liveNewsFeedText = getUiTranslation(selectedLanguage, 'liveNewsFeed') || 'LIVE NEWS FEED';
@@ -76,6 +82,67 @@ export default function Header({
                 selectedLanguage={selectedLanguage}
                 onLanguageChange={onLanguageChange}
               />
+            </div>
+            <div className="control-item header-share-control">
+              <ShareButton
+                variant="masthead"
+                url={typeof window !== 'undefined' ? window.location.origin : ''}
+                title="MND — Multilingual News Digest"
+                text="Stay updated with the latest Indian news. Sports, politics, technology, education and more — in your language."
+              />
+            </div>
+            {onFeedbackClick && (
+              <div className="control-item header-feedback-control">
+                <button
+                  type="button"
+                  className="header-feedback-btn"
+                  onClick={onFeedbackClick}
+                  title="Send Feedback"
+                  aria-label="Send Feedback"
+                >
+                  <span className="header-feedback-icon" aria-hidden="true">✉</span>
+                  <span className="header-feedback-text">Feedback</span>
+                </button>
+              </div>
+            )}
+            <div className="control-item header-auth-control">
+              {status === 'authenticated' ? (
+                <div className="header-user-menu">
+                  <button
+                    type="button"
+                    className="header-avatar-btn"
+                    onClick={onProfileClick}
+                    title={session?.user?.email || 'My Account'}
+                    aria-label="Open profile panel"
+                  >
+                    <span className="avatar-circle">
+                      {(session?.user?.email?.[0] || 'U').toUpperCase()}
+                    </span>
+                    <span className="avatar-email-label">
+                      {session?.user?.email?.split('@')[0]}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="header-signout-btn"
+                    onClick={() => signOut({ redirect: false })}
+                    title="Sign Out"
+                    aria-label="Sign Out"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="header-auth-btn"
+                  onClick={onAuthClick}
+                  aria-label="Sign In to your account"
+                >
+                  <span className="auth-btn-icon" aria-hidden="true">👤</span>
+                  <span className="auth-btn-text">Sign In</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
